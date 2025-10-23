@@ -1,9 +1,11 @@
-// file: server.js
-// bisa jalan di node langsung, atau nanti tinggal taruh di /api/index.js buat vercel
+// =============================================
+// Bisa jalan di Node lokal ATAU di Vercel
+// =============================================
 
 const http = require("http");
 const url = require("url");
 
+// Data terakhir dari ESP32
 let lastData = {
   moisture1: 0,
   moisture2: 0,
@@ -13,29 +15,27 @@ let lastData = {
   updatedAt: null
 };
 
+// Perintah ke ESP32
 let command = {
   pump: null,        // 1 = ON, 0 = OFF
   water_pot: null    // 0,1,2
 };
 
-const server = http.createServer((req, res) => {
+// Fungsi handler utama (bisa dipakai oleh server http atau Vercel)
+function handleRequest(req, res) {
   const parsedUrl = url.parse(req.url, true);
   const { pathname, query } = parsedUrl;
 
   // === POST /  → ESP32 kirim data sensor ===
-  if (req.method === "POST" && pathname === "/") {
+  if (req.method === "POST" && (pathname === "/" || pathname === "/api")) {
     let body = "";
-    req.on("data", chunk => {
-      body += chunk;
-    });
+    req.on("data", chunk => { body += chunk; });
     req.on("end", () => {
       try {
         const data = JSON.parse(body);
-        lastData = {
-          ...data,
-          updatedAt: new Date().toISOString()
-        };
+        lastData = { ...data, updatedAt: new Date().toISOString() };
         console.log("📩 Data diterima dari ESP32:", lastData);
+
         res.writeHead(200, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ status: "ok", received: lastData }));
       } catch (err) {
@@ -46,8 +46,7 @@ const server = http.createServer((req, res) => {
   }
 
   // === GET /  → ESP32 ambil perintah ===
-  else if (req.method === "GET" && pathname === "/") {
-    // kalau admin kirim query (contoh: ?pump=1&water_pot=2), ubah command
+  else if (req.method === "GET" && (pathname === "/" || pathname === "/api")) {
     if (query.pump !== undefined) {
       command.pump = parseInt(query.pump);
       console.log("⚙️  Perintah pump diubah jadi:", command.pump);
@@ -60,12 +59,12 @@ const server = http.createServer((req, res) => {
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify(command));
 
-    // reset perintah setelah dikirim (biar gak diulang)
+    // Reset biar gak diulang
     command = { pump: null, water_pot: null };
   }
 
   // === GET /status  → buat debug di browser ===
-  else if (req.method === "GET" && pathname === "/status") {
+  else if (req.method === "GET" && (pathname === "/status" || pathname === "/api/status")) {
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify(lastData, null, 2));
   }
@@ -75,10 +74,20 @@ const server = http.createServer((req, res) => {
     res.writeHead(404, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ error: "Not Found" }));
   }
-});
+}
 
-// Jalankan server (lokal)
-const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => {
-  console.log(`🚀 Server jalan di http://localhost:${PORT}`);
-});
+// =============================================
+// Mode A: dijalankan lokal pakai node server.js
+// =============================================
+if (require.main === module) {
+  const PORT = process.env.PORT || 3000;
+  const server = http.createServer(handleRequest);
+  server.listen(PORT, () => {
+    console.log(`🚀 Server lokal jalan di http://localhost:${PORT}`);
+  });
+}
+
+// =============================================
+// Mode B: dijalankan di Vercel
+// =============================================
+module.exports = (req, res) => handleRequest(req, res);
